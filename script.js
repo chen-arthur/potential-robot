@@ -1,8 +1,8 @@
 document.addEventListener('DOMContentLoaded', function() {
     const stockDataElement = document.getElementById('stock-data');
-    const fmpApiKey = 'demo'; // Replace with your FMP key if 'demo' is too limited
+    const eodApiKey = 'demo'; // EODHistoricalData demo token
     const symbol = 'AMZN';
-    const apiUrl = `https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?apikey=${fmpApiKey}`;
+    const apiUrl = `https://eodhistoricaldata.com/api/eod/${symbol}.US?api_token=${eodApiKey}&format=json`;
 
     let fullTimeSeriesData = {}; // Initialize as an empty object
 
@@ -11,49 +11,59 @@ document.addEventListener('DOMContentLoaded', function() {
     fetch(apiUrl)
         .then(response => {
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                return response.json().then(errData => {
+                    throw new Error(`HTTP error! status: ${response.status}. EODHD Message: ${JSON.stringify(errData)}`);
+                }).catch(() => {
+                    throw new Error(`HTTP error! status: ${response.status}. Could not parse error response.`);
+                });
             }
             return response.json();
         })
         .then(data => {
-            if (data['Error Message']) {
-                throw new Error(`FMP API Error: ${data['Error Message']}`);
+            if (!Array.isArray(data)) {
+                if (data.error) {
+                     throw new Error(`EODHD API Error: ${data.error}`);
+                }
+                throw new Error(`EODHD API Error: Expected an array but received: ${JSON.stringify(data)}`);
+            }
+            if (data.length === 0) {
+                throw new Error('Invalid API response: No historical data found in EODHD response (empty array).');
             }
 
-            const historicalArray = data.historical;
-            if (!historicalArray || historicalArray.length === 0) {
-                throw new Error('Invalid API response: No historical data found in FMP response.');
-            }
-
-            historicalArray.forEach(dailyData => {
-                if (dailyData.date) {
+            // Populate fullTimeSeriesData using EODHD data array
+            // Store EODHD's 'adjusted_close' as 'close' in our internal structure
+            data.forEach(dailyData => {
+                if (dailyData.date) { // EODHD 'date' is YYYY-MM-DD
                     fullTimeSeriesData[dailyData.date] = {
                         open: dailyData.open,
                         high: dailyData.high,
                         low: dailyData.low,
-                        close: dailyData.close,
+                        close: dailyData.adjusted_close, // Crucial: use adjusted_close from EODHD
                         volume: dailyData.volume
                     };
                 }
             });
 
-            const latestDataFMP = historicalArray[0];
-            if (!latestDataFMP) {
-                throw new Error('No latest data point found in FMP historical array for initial display.');
+            // Initial display using the last item from the EODHD array (newest)
+            const latestDataEODHD = data[data.length - 1];
+            if (!latestDataEODHD) {
+                // This should be caught by data.length === 0, but as a safeguard
+                throw new Error('No latest data point found in EODHD response for initial display.');
             }
-            const displayDate = latestDataFMP.date;
-            const open = parseFloat(latestDataFMP.open).toFixed(2);
-            const high = parseFloat(latestDataFMP.high).toFixed(2);
-            const low = parseFloat(latestDataFMP.low).toFixed(2);
-            const close = parseFloat(latestDataFMP.close).toFixed(2);
-            const volume = latestDataFMP.volume;
+            const displayDate = latestDataEODHD.date;
+            const open = parseFloat(latestDataEODHD.open).toFixed(2);
+            const high = parseFloat(latestDataEODHD.high).toFixed(2);
+            const low = parseFloat(latestDataEODHD.low).toFixed(2);
+            // For display, explicitly use adjusted_close and label it as such
+            const adjustedCloseDisplay = parseFloat(latestDataEODHD.adjusted_close).toFixed(2);
+            const volume = latestDataEODHD.volume;
 
             stockDataElement.innerHTML = `
                 <p><strong>Date:</strong> ${displayDate}</p>
                 <p><strong>Open:</strong> $${open}</p>
                 <p><strong>High:</strong> $${high}</p>
                 <p><strong>Low:</strong> $${low}</p>
-                <p><strong>Close:</strong> $${close}</p>
+                <p><strong>Adjusted Close:</strong> $${adjustedCloseDisplay}</p>
                 <p><strong>Volume:</strong> ${volume}</p>
             `;
         })
@@ -109,26 +119,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
+            // Calculation logic now uses 'close' which holds adjusted_close from EODHD
             const historicalClose = parseFloat(historicalData.close);
 
-            // Robustly find the latest date from fullTimeSeriesData
             const allDates = Object.keys(fullTimeSeriesData);
             if (allDates.length === 0) {
                  errorMessageCalcEl.textContent = 'No dates available in processed historical data.';
                  return;
             }
-            allDates.sort((a, b) => b.localeCompare(a)); // Sorts descending (e.g., "2023-10-26" comes before "2023-10-25")
-            const latestDateStr = allDates[0]; // The first element is now the latest date
+            allDates.sort((a, b) => b.localeCompare(a));
+            const latestDateStr = allDates[0];
 
             const latestDataForCalc = fullTimeSeriesData[latestDateStr];
             if (!latestDataForCalc) {
                  errorMessageCalcEl.textContent = `Missing data for the determined latest date: ${latestDateStr}`;
                  return;
             }
+            // Calculation logic now uses 'close' which holds adjusted_close from EODHD
             const latestClose = parseFloat(latestDataForCalc.close);
 
             if (historicalClose <= 0) {
-                errorMessageCalcEl.textContent = 'Historical closing price is zero or negative.';
+                errorMessageCalcEl.textContent = 'Historical adjusted closing price is zero or negative.'; // Message updated for clarity
                 return;
             }
 
@@ -155,8 +166,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (selectedDateStr !== actualHistoricalDateStr) {
                 dateNotice = ` (Data from ${actualHistoricalDateStr} as ${selectedDateStr} was non-trading/no data)`;
             }
-            percentageIncreaseEl.textContent = `Increase since ${selectedDateStr}${dateNotice}: ${percentageIncrease.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr})`;
-            apyResultEl.textContent = `Equivalent APY: ${apy.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr})`;
+            // Message updated to reflect that calculations are based on adjusted close prices
+            percentageIncreaseEl.textContent = `Increase (Adjusted Close) since ${selectedDateStr}${dateNotice}: ${percentageIncrease.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr})`;
+            apyResultEl.textContent = `Equivalent APY (Adjusted Close): ${apy.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr})`;
 
         } catch (error) {
             console.error('Error during calculation:', error);
