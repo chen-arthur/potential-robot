@@ -8,8 +8,20 @@
 </head>
 <body>
     <h1>Amazon (AMZN) Stock Data</h1>
+    <div id="historical-feature">
+        <h2>Compare with Past Data</h2>
+        <label for="historical-date">Select a Past Date:</label>
+        <input type="date" id="historical-date" name="historical-date">
+        <button id="calculate-btn">Calculate Growth</button>
+    </div>
     <div id="stock-data">
         <p>Loading data...</p>
+    </div>
+    <div id="calculation-results">
+        <h3>Calculation Results:</h3>
+        <p id="percentage-increase"></p>
+        <p id="apy-result"></p>
+        <p id="error-message-calc" class="error"></p>
     </div>
     <p style="text-align: center; font-size: 0.8em; color: #555; margin-top: 30px;">
         <em>Disclaimer: The stock information displayed on this page is for informational purposes only and does not constitute investment advice.</em>
