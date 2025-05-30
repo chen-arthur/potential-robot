@@ -1,0 +1,34 @@
+body {
+    font-family: sans-serif;
+    margin: 20px;
+    background-color: #f4f4f4;
+    color: #333;
+}
+
+h1 {
+    color: #2c3e50;
+    text-align: center;
+}
+
+#stock-data {
+    background-color: #fff;
+    border: 1px solid #ddd;
+    padding: 20px;
+    margin-top: 20px;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+#stock-data p {
+    margin: 10px 0;
+    line-height: 1.6;
+}
+
+#stock-data p strong {
+    color: #555;
+}
+
+.error {
+    color: #e74c3c;
+    font-weight: bold;
+}
