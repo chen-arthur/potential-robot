@@ -1,10 +1,10 @@
 document.addEventListener('DOMContentLoaded', function() {
     const stockDataElement = document.getElementById('stock-data');
-    const apiKey = 'DEMO'; // Replace with your own Alpha Vantage API key if needed
+    const fmpApiKey = 'demo'; // Replace with your FMP key if 'demo' is too limited
     const symbol = 'AMZN';
-    const apiUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${symbol}&outputsize=full&apikey=${apiKey}`;
+    const apiUrl = `https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?apikey=${fmpApiKey}`;
 
-    let fullTimeSeriesData = null;
+    let fullTimeSeriesData = {}; // Initialize as an empty object
 
     stockDataElement.innerHTML = '<p>Fetching latest stock data for AMZN...</p>';
 
@@ -17,42 +17,43 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(data => {
             if (data['Error Message']) {
-                throw new Error(`API Error: ${data['Error Message']}`);
-            }
-            if (data['Information']) {
-                 throw new Error(`API Information: ${data['Information']}. The demo API key has limitations.`);
+                throw new Error(`FMP API Error: ${data['Error Message']}`);
             }
 
-            const timeSeries = data['Time Series (Daily)'];
-            if (!timeSeries) {
-                throw new Error('Invalid API response: Time Series (Daily) data is missing.');
+            const historicalArray = data.historical;
+            if (!historicalArray || historicalArray.length === 0) {
+                throw new Error('Invalid API response: No historical data found in FMP response.');
             }
 
-            fullTimeSeriesData = timeSeries;
+            historicalArray.forEach(dailyData => {
+                if (dailyData.date) {
+                    fullTimeSeriesData[dailyData.date] = {
+                        open: dailyData.open,
+                        high: dailyData.high,
+                        low: dailyData.low,
+                        close: dailyData.close,
+                        volume: dailyData.volume
+                    };
+                }
+            });
 
-            const dates = Object.keys(fullTimeSeriesData);
-            if (dates.length === 0) {
-                throw new Error('Invalid API response: No dates found in time series.');
+            const latestDataFMP = historicalArray[0];
+            if (!latestDataFMP) {
+                throw new Error('No latest data point found in FMP historical array for initial display.');
             }
-            const latestDate = dates[0];
-            const latestData = fullTimeSeriesData[latestDate];
-
-            if (!latestData) {
-                throw new Error(`No data found for ${latestDate}.`);
-            }
-
-            const open = parseFloat(latestData['1. open']).toFixed(2);
-            const high = parseFloat(latestData['2. high']).toFixed(2);
-            const low = parseFloat(latestData['3. low']).toFixed(2);
-            const close = parseFloat(latestData['5. adjusted close']).toFixed(2);
-            const volume = latestData['6. volume'];
+            const displayDate = latestDataFMP.date;
+            const open = parseFloat(latestDataFMP.open).toFixed(2);
+            const high = parseFloat(latestDataFMP.high).toFixed(2);
+            const low = parseFloat(latestDataFMP.low).toFixed(2);
+            const close = parseFloat(latestDataFMP.close).toFixed(2);
+            const volume = latestDataFMP.volume;
 
             stockDataElement.innerHTML = `
-                <p><strong>Date:</strong> ${latestDate}</p>
+                <p><strong>Date:</strong> ${displayDate}</p>
                 <p><strong>Open:</strong> $${open}</p>
                 <p><strong>High:</strong> $${high}</p>
                 <p><strong>Low:</strong> $${low}</p>
-                <p><strong>Adjusted Close:</strong> $${close}</p>
+                <p><strong>Close:</strong> $${close}</p>
                 <p><strong>Volume:</strong> ${volume}</p>
             `;
         })
@@ -72,8 +73,8 @@ document.addEventListener('DOMContentLoaded', function() {
         errorMessageCalcEl.textContent = '';
 
         try {
-            if (!fullTimeSeriesData) {
-                errorMessageCalcEl.textContent = 'Historical data not yet loaded. Please wait for initial data to load.';
+            if (Object.keys(fullTimeSeriesData).length === 0) {
+                errorMessageCalcEl.textContent = 'Historical data not yet loaded or processed. Please wait or refresh.';
                 return;
             }
 
@@ -85,10 +86,10 @@ document.addEventListener('DOMContentLoaded', function() {
             let actualHistoricalDateStr = selectedDateStr;
             let historicalData = fullTimeSeriesData[actualHistoricalDateStr];
             let attempts = 0;
-            const maxAttempts = 7; // Look back up to 7 days
+            const maxAttempts = 7;
 
             while (!historicalData && attempts < maxAttempts) {
-                errorMessageCalcEl.textContent = `No data for ${actualHistoricalDateStr}. Trying previous day...`; // Temporary message
+                errorMessageCalcEl.textContent = `No data for ${actualHistoricalDateStr}. Trying previous day...`;
                 const currentDate = new Date(actualHistoricalDateStr);
                 currentDate.setDate(currentDate.getDate() - 1);
 
@@ -101,30 +102,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 attempts++;
             }
 
-            errorMessageCalcEl.textContent = ''; // Clear temporary messages
+            errorMessageCalcEl.textContent = '';
 
             if (!historicalData) {
-                errorMessageCalcEl.textContent = `No data available for selected date ${selectedDateStr} or nearby prior trading days (up to ${maxAttempts} days).`;
+                errorMessageCalcEl.textContent = `No data available for selected date ${selectedDateStr} or nearby prior trading days.`;
                 return;
             }
 
-            const historicalClose = parseFloat(historicalData['5. adjusted close']);
-            const dates = Object.keys(fullTimeSeriesData);
-            const latestDateStr = dates[0];
-            const latestClose = parseFloat(fullTimeSeriesData[latestDateStr]['5. adjusted close']);
+            const historicalClose = parseFloat(historicalData.close);
+
+            // Robustly find the latest date from fullTimeSeriesData
+            const allDates = Object.keys(fullTimeSeriesData);
+            if (allDates.length === 0) {
+                 errorMessageCalcEl.textContent = 'No dates available in processed historical data.';
+                 return;
+            }
+            allDates.sort((a, b) => b.localeCompare(a)); // Sorts descending (e.g., "2023-10-26" comes before "2023-10-25")
+            const latestDateStr = allDates[0]; // The first element is now the latest date
+
+            const latestDataForCalc = fullTimeSeriesData[latestDateStr];
+            if (!latestDataForCalc) {
+                 errorMessageCalcEl.textContent = `Missing data for the determined latest date: ${latestDateStr}`;
+                 return;
+            }
+            const latestClose = parseFloat(latestDataForCalc.close);
 
             if (historicalClose <= 0) {
-                errorMessageCalcEl.textContent = 'Historical adjusted closing price is zero or negative, cannot calculate growth.';
+                errorMessageCalcEl.textContent = 'Historical closing price is zero or negative.';
                 return;
             }
 
-            // Use actualHistoricalDateStr for date1, as this is the date whose data we are using
             const date1 = new Date(actualHistoricalDateStr);
             const date2 = new Date(latestDateStr);
 
             if (date1 >= date2) {
-                // This check should now use actualHistoricalDateStr
-                errorMessageCalcEl.textContent = `The found historical date (${actualHistoricalDateStr}) must be before the latest trading day (${latestDateStr}).`;
+                errorMessageCalcEl.textContent = `Found historical date (${actualHistoricalDateStr}) must be before latest day (${latestDateStr}).`;
                 return;
             }
 
@@ -133,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const years = timeDiffMillis / (1000 * 60 * 60 * 24 * 365.25);
 
             if (years <= 0) {
-                errorMessageCalcEl.textContent = 'Time difference is too short for APY calculation.';
+                errorMessageCalcEl.textContent = 'Time difference too short for APY.';
                 return;
             }
 
@@ -141,15 +153,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
             let dateNotice = '';
             if (selectedDateStr !== actualHistoricalDateStr) {
-                dateNotice = ` (Data from ${actualHistoricalDateStr} as ${selectedDateStr} was a non-trading day or had no data)`;
+                dateNotice = ` (Data from ${actualHistoricalDateStr} as ${selectedDateStr} was non-trading/no data)`;
             }
-            // Display selectedDateStr as the primary reference, but provide the actual date used in the notice
-            percentageIncreaseEl.textContent = `Percentage Increase since ${selectedDateStr}${dateNotice}: ${percentageIncrease.toFixed(2)}% (using data from ${actualHistoricalDateStr} to ${latestDateStr})`;
-            apyResultEl.textContent = `Equivalent APY: ${apy.toFixed(2)}% (based on data from ${actualHistoricalDateStr} to ${latestDateStr})`;
+            percentageIncreaseEl.textContent = `Increase since ${selectedDateStr}${dateNotice}: ${percentageIncrease.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr})`;
+            apyResultEl.textContent = `Equivalent APY: ${apy.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr})`;
 
         } catch (error) {
             console.error('Error during calculation:', error);
-            errorMessageCalcEl.textContent = `An unexpected error occurred: ${error.message}`;
+            errorMessageCalcEl.textContent = `An unexpected error occurred: ${error.message}.`;
         }
     });
 });
