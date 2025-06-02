@@ -1,69 +1,73 @@
 document.addEventListener('DOMContentLoaded', function() {
     const stockDataElement = document.getElementById('stock-data');
-    const eodApiKey = 'demo'; // EODHistoricalData demo token
+    const apiKey = 'DEMO'; // Alpha Vantage DEMO key
     const symbol = 'AMZN';
-    const apiUrl = `https://eodhistoricaldata.com/api/eod/${symbol}.US?api_token=${eodApiKey}&format=json`;
+    const apiUrl = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${symbol}&outputsize=full&apikey=${apiKey}`;
 
-    let fullTimeSeriesData = {}; // Initialize as an empty object
+    let fullTimeSeriesData = {}; // Initialize as an empty object, will be assigned Alpha Vantage's timeSeries object
 
     stockDataElement.innerHTML = '<p>Fetching latest stock data for AMZN...</p>';
 
     fetch(apiUrl)
         .then(response => {
             if (!response.ok) {
+                // Attempt to parse JSON error from Alpha Vantage if possible
                 return response.json().then(errData => {
-                    throw new Error(`HTTP error! status: ${response.status}. EODHD Message: ${JSON.stringify(errData)}`);
+                    // Alpha Vantage often includes error details in the JSON body even for non-200 responses
+                    const apiErrorMessage = errData['Error Message'] || errData['Information'] || JSON.stringify(errData);
+                    throw new Error(`HTTP error! status: ${response.status}. API Message: ${apiErrorMessage}`);
                 }).catch(() => {
+                    // Fallback if the error response isn't JSON
                     throw new Error(`HTTP error! status: ${response.status}. Could not parse error response.`);
                 });
             }
             return response.json();
         })
         .then(data => {
-            if (!Array.isArray(data)) {
-                if (data.error) {
-                     throw new Error(`EODHD API Error: ${data.error}`);
-                }
-                throw new Error(`EODHD API Error: Expected an array but received: ${JSON.stringify(data)}`);
+            // Alpha Vantage specific error checking
+            if (data['Error Message']) {
+                throw new Error(`Alpha Vantage API Error: ${data['Error Message']}`);
             }
-            if (data.length === 0) {
-                throw new Error('Invalid API response: No historical data found in EODHD response (empty array).');
+            // Alpha Vantage rate limit messages are often in 'Information'
+            if (data['Information']) {
+                stockDataElement.innerHTML = `<p class="error">API Information: ${data['Information']}</p>`;
+                // Throw an error to stop further processing and log it, as it's not usable data
+                throw new Error(`Alpha Vantage API Information: ${data['Information']}`);
             }
 
-            // Populate fullTimeSeriesData using EODHD data array
-            // Store EODHD's 'adjusted_close' as 'close' in our internal structure
-            data.forEach(dailyData => {
-                if (dailyData.date) { // EODHD 'date' is YYYY-MM-DD
-                    fullTimeSeriesData[dailyData.date] = {
-                        open: dailyData.open,
-                        high: dailyData.high,
-                        low: dailyData.low,
-                        close: dailyData.adjusted_close, // Crucial: use adjusted_close from EODHD
-                        volume: dailyData.volume
-                    };
-                }
-            });
-
-            // Initial display using the last item from the EODHD array (newest)
-            const latestDataEODHD = data[data.length - 1];
-            if (!latestDataEODHD) {
-                // This should be caught by data.length === 0, but as a safeguard
-                throw new Error('No latest data point found in EODHD response for initial display.');
+            const timeSeries = data['Time Series (Daily)'];
+            if (!timeSeries) {
+                throw new Error('Invalid API response: "Time Series (Daily)" data is missing from Alpha Vantage response.');
             }
-            const displayDate = latestDataEODHD.date;
-            const open = parseFloat(latestDataEODHD.open).toFixed(2);
-            const high = parseFloat(latestDataEODHD.high).toFixed(2);
-            const low = parseFloat(latestDataEODHD.low).toFixed(2);
-            // For display, explicitly use adjusted_close and label it as such
-            const adjustedCloseDisplay = parseFloat(latestDataEODHD.adjusted_close).toFixed(2);
-            const volume = latestDataEODHD.volume;
+
+            fullTimeSeriesData = timeSeries; // Assign Alpha Vantage's time series object directly
+
+            const dates = Object.keys(timeSeries);
+            if (dates.length === 0) {
+                throw new Error('No dates found in Alpha Vantage time series.');
+            }
+            dates.sort((a, b) => b.localeCompare(a)); // Sort dates descending, newest first
+            const latestDateStr_display = dates[0];
+            const latestData_display = timeSeries[latestDateStr_display];
+
+            if (!latestData_display) {
+                throw new Error(`No data found for the latest date (${latestDateStr_display}) for display.`);
+            }
+
+            // Extract data using Alpha Vantage field names
+            const displayDate = latestDateStr_display; // Date is the key itself
+            const open = parseFloat(latestData_display['1. open']).toFixed(2);
+            const high = parseFloat(latestData_display['2. high']).toFixed(2);
+            const low = parseFloat(latestData_display['3. low']).toFixed(2);
+            const adjustedClose = parseFloat(latestData_display['5. adjusted close']).toFixed(2);
+            const volume = latestData_display['6. volume'];
 
             stockDataElement.innerHTML = `
                 <p><strong>Date:</strong> ${displayDate}</p>
                 <p><strong>Open:</strong> $${open}</p>
                 <p><strong>High:</strong> $${high}</p>
                 <p><strong>Low:</strong> $${low}</p>
-                <p><strong>Adjusted Close:</strong> $${adjustedCloseDisplay}</p>
+                <p><strong>Adjusted Close:</strong> $${adjustedClose}</p> 
                 <p><strong>Volume:</strong> ${volume}</p>
             `;
         })
@@ -94,60 +98,60 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             let actualHistoricalDateStr = selectedDateStr;
-            let historicalData = fullTimeSeriesData[actualHistoricalDateStr];
+            let historicalData = fullTimeSeriesData[actualHistoricalDateStr]; // AV data is directly keyed by date
             let attempts = 0;
-            const maxAttempts = 7;
+            const maxAttempts = 7; 
 
             while (!historicalData && attempts < maxAttempts) {
                 errorMessageCalcEl.textContent = `No data for ${actualHistoricalDateStr}. Trying previous day...`;
                 const currentDate = new Date(actualHistoricalDateStr);
                 currentDate.setDate(currentDate.getDate() - 1);
-
+                
                 const year = currentDate.getFullYear();
                 const month = String(currentDate.getMonth() + 1).padStart(2, '0');
                 const day = String(currentDate.getDate()).padStart(2, '0');
                 actualHistoricalDateStr = `${year}-${month}-${day}`;
-
+                
                 historicalData = fullTimeSeriesData[actualHistoricalDateStr];
                 attempts++;
             }
-
-            errorMessageCalcEl.textContent = '';
+            
+            errorMessageCalcEl.textContent = ''; 
 
             if (!historicalData) {
                 errorMessageCalcEl.textContent = `No data available for selected date ${selectedDateStr} or nearby prior trading days.`;
                 return;
             }
 
-            // Calculation logic now uses 'close' which holds adjusted_close from EODHD
-            const historicalClose = parseFloat(historicalData.close);
+            // Use Alpha Vantage field name '5. adjusted close'
+            const historicalClose = parseFloat(historicalData['5. adjusted close']); 
 
             const allDates = Object.keys(fullTimeSeriesData);
-            if (allDates.length === 0) {
+            if (allDates.length === 0) { 
                  errorMessageCalcEl.textContent = 'No dates available in processed historical data.';
                  return;
             }
-            allDates.sort((a, b) => b.localeCompare(a));
-            const latestDateStr = allDates[0];
-
-            const latestDataForCalc = fullTimeSeriesData[latestDateStr];
+            allDates.sort((a, b) => b.localeCompare(a)); 
+            const latestDateStr_calc = allDates[0]; // latestDateStr for calculation
+            
+            const latestDataForCalc = fullTimeSeriesData[latestDateStr_calc];
             if (!latestDataForCalc) {
-                 errorMessageCalcEl.textContent = `Missing data for the determined latest date: ${latestDateStr}`;
+                 errorMessageCalcEl.textContent = `Missing data for the determined latest date: ${latestDateStr_calc}`;
                  return;
             }
-            // Calculation logic now uses 'close' which holds adjusted_close from EODHD
-            const latestClose = parseFloat(latestDataForCalc.close);
+            // Use Alpha Vantage field name '5. adjusted close'
+            const latestClose = parseFloat(latestDataForCalc['5. adjusted close']);
 
             if (historicalClose <= 0) {
-                errorMessageCalcEl.textContent = 'Historical adjusted closing price is zero or negative.'; // Message updated for clarity
+                errorMessageCalcEl.textContent = 'Historical adjusted closing price is zero or negative.';
                 return;
             }
-
-            const date1 = new Date(actualHistoricalDateStr);
-            const date2 = new Date(latestDateStr);
+            
+            const date1 = new Date(actualHistoricalDateStr); 
+            const date2 = new Date(latestDateStr_calc);
 
             if (date1 >= date2) {
-                errorMessageCalcEl.textContent = `Found historical date (${actualHistoricalDateStr}) must be before latest day (${latestDateStr}).`;
+                errorMessageCalcEl.textContent = `Found historical date (${actualHistoricalDateStr}) must be before latest day (${latestDateStr_calc}).`;
                 return;
             }
 
@@ -155,20 +159,20 @@ document.addEventListener('DOMContentLoaded', function() {
             const timeDiffMillis = date2 - date1;
             const years = timeDiffMillis / (1000 * 60 * 60 * 24 * 365.25);
 
-            if (years <= 0) {
+            if (years <= 0) { 
                 errorMessageCalcEl.textContent = 'Time difference too short for APY.';
                 return;
             }
-
+            
             const apy = (Math.pow(latestClose / historicalClose, 1 / years) - 1) * 100;
 
             let dateNotice = '';
             if (selectedDateStr !== actualHistoricalDateStr) {
                 dateNotice = ` (Data from ${actualHistoricalDateStr} as ${selectedDateStr} was non-trading/no data)`;
             }
-            // Message updated to reflect that calculations are based on adjusted close prices
-            percentageIncreaseEl.textContent = `Increase (Adjusted Close) since ${selectedDateStr}${dateNotice}: ${percentageIncrease.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr})`;
-            apyResultEl.textContent = `Equivalent APY (Adjusted Close): ${apy.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr})`;
+            // Labels confirm that adjusted close prices are used.
+            percentageIncreaseEl.textContent = `Increase (Adjusted Close) since ${selectedDateStr}${dateNotice}: ${percentageIncrease.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr_calc})`;
+            apyResultEl.textContent = `Equivalent APY (Adjusted Close): ${apy.toFixed(2)}% (from ${actualHistoricalDateStr} to ${latestDateStr_calc})`;
 
         } catch (error) {
             console.error('Error during calculation:', error);
